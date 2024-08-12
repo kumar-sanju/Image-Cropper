@@ -24,8 +24,6 @@ import com.smart.cropperlibrary.CropActivity;
 
 import java.io.File;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -33,7 +31,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_IMAGE_PICK = 1;
     private static final int REQUEST_CROP_IMAGE = 1001;
     private ImageView imageView;
-    private String currentPhotoPath;
+    private Uri photoURI;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -86,41 +84,28 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-            // Capture successful, start cropping
-            if (currentPhotoPath != null) {
-                File f = new File(currentPhotoPath);
-                Uri capturedImageUri = Uri.fromFile(f);
-
-                if (capturedImageUri != null) {
-                    // Start CropActivity
-                    Intent cropIntent = new Intent(MainActivity.this, CropActivity.class);
-                    cropIntent.putExtra("imageUri", capturedImageUri.toString());
-                    startActivityForResult(cropIntent, REQUEST_CROP_IMAGE);
-                }
-            }
-
-        }
-
-        else if (requestCode == REQUEST_IMAGE_PICK && resultCode == RESULT_OK && data != null) {
+        if (requestCode == REQUEST_IMAGE_PICK && resultCode == RESULT_OK && data != null) {
             Uri selectedImageUri = data.getData();
-            try {
-                Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(), selectedImageUri);
-                imageView.setImageBitmap(bitmap);
-
-                // Start CropActivity
-                Intent cropIntent = new Intent(MainActivity.this, CropActivity.class);
-                cropIntent.putExtra("imageUri", selectedImageUri.toString());
-                startActivityForResult(cropIntent, REQUEST_CROP_IMAGE);
-
-            } catch (IOException e) {
-                e.printStackTrace();
-                Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show();
-            }
-        }
-        else if (requestCode == REQUEST_CROP_IMAGE && resultCode == RESULT_OK && data != null) {
+            sendImageToCropActivity(selectedImageUri);
+        } else if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
+            sendImageToCropActivity(photoURI);
+        } else if (requestCode == REQUEST_CROP_IMAGE && resultCode == RESULT_OK && data != null) {
             Bitmap croppedBitmap = data.getParcelableExtra("croppedBitmap");
             imageView.setImageBitmap(croppedBitmap);
+        }
+    }
+
+    private void sendImageToCropActivity(Uri imageUri) {
+        try {
+            Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(), imageUri);
+            imageView.setImageBitmap(bitmap);
+
+            Intent cropIntent = new Intent(MainActivity.this, CropActivity.class);
+            cropIntent.putExtra("imageUri", imageUri.toString());
+            startActivityForResult(cropIntent, REQUEST_CROP_IMAGE);
+        } catch (IOException e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -150,34 +135,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void checkCameraPermissionAndCapture() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-                == PackageManager.PERMISSION_GRANTED) {
-            // Permission already granted, proceed with capturing image
-            dispatchTakePictureIntent();
-        } else {
-            // Permission not granted, request it
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE},
                     REQUEST_IMAGE_CAPTURE);
+        } else {
+            dispatchTakePictureIntent();
         }
     }
 
     private void dispatchTakePictureIntent() {
         Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        // Ensure that there's a camera activity to handle the intent
         if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
-            // Create the File where the photo should go
             File photoFile = null;
             try {
                 photoFile = createImageFile();
             } catch (IOException ex) {
-
+                Toast.makeText(this, "Error occurred while creating the file", Toast.LENGTH_SHORT).show();
             }
-            // Continue only if the File was successfully created
+
             if (photoFile != null) {
-                Uri photoURI = FileProvider.getUriForFile(this,
-                        "com.smart.imagecropper.provider",
-                        photoFile);
+                photoURI = FileProvider.getUriForFile(this, "com.smart.imagecropper.fileprovider", photoFile);
                 takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI);
                 startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
             }
@@ -186,18 +165,18 @@ public class MainActivity extends AppCompatActivity {
 
     private File createImageFile() throws IOException {
         // Create an image file name
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        String imageFileName = "JPEG_" + timeStamp + "_";
-//        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
-        File storageDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
-        File image = File.createTempFile(
-                imageFileName,  /* prefix */
-                ".jpg",         /* suffix */
-                storageDir      /* directory */
-        );
+        String imageFileName = "JPEG_" + System.currentTimeMillis() + "_";
+        File storageDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "ImageCropper");
 
-        // Save a file: path for use with ACTION_VIEW intents
-        currentPhotoPath = image.getAbsolutePath();
+        if (!storageDir.exists()) {
+            storageDir.mkdirs();  // Create directory if it does not exist
+        }
+
+        File image = File.createTempFile(
+                imageFileName,
+                ".jpg",
+                storageDir
+        );
         return image;
     }
 
